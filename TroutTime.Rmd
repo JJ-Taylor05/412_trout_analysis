@@ -1,0 +1,588 @@
+---
+title: "TroutTime"
+author: "Dylan Rees Jones"
+date: "2026-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install.packages(c("rnaturalearth", "rnaturalearthdata", "sf"))
+# install.packages("ggpattern")
+library(readr)
+library(VennDiagram)
+library(tidyr)
+records <- read_csv("WilderlabPublicData-2026-08-17 1403/records.csv")
+samples <- read_csv("WilderlabPublicData-2026-08-17 1403/samples.csv")
+```
+##**First lookin around**
+```{r}
+nrow(records) # <- Checking the number of samples
+nrow(samples) # <- ""
+
+# Setting up different trout data
+Trout <- records[records$CommonName == "Trout", ]
+BrownTrout <- records[records$CommonName == "Brown Trout", ]
+RainTrout <- records[records$CommonName == "Rainbow Trout", ]
+
+# Includes all the other kind of trout thingos
+allTrout <- records[grepl("trout", records$CommonName, ignore.case = TRUE), ]
+
+# Kind of weird, not organised amazingly well
+table(allTrout$CommonName)
+
+## Gonna stick with just brown trout and rainbow trout
+duoTrout <- rbind(BrownTrout, RainTrout)
+```
+
+
+```{r}
+## Rearanging the dataframe
+
+# How many IDs there are
+length(unique(records$UID))
+
+# Makes the dataframes
+commonNamesList <- as.list(unique(records$CommonName))
+uidsList <- as.list(unique(records$UID))
+
+orgDF <- data.frame(matrix(NA, nrow = length(uidsList), ncol = length(commonNamesList)))
+rownames(orgDF) <- uidsList
+colnames(orgDF) <- commonNamesList
+
+# Checks how many times each fish shows up in the data
+# Gonna keep em all
+fishPlot <- table(records$CommonName)
+barplot(fishPlot, las = 2)
+
+# Reorders the dataframe
+records <- records[!is.na(records$CommonName), ]
+for (i in 1:nrow(records)) {
+  id <- records$UID[i]
+  name <- records$CommonName[i]
+  count <- records$Count[i]
+  orgDF[as.character(id), as.character(name)] <- count
+}
+```
+
+# Amount of trout
+```{r}
+yesRainTroutUIDs <- orgDF[!is.na(orgDF$"Rainbow trout"), ]
+noRainTroutUIDs <- orgDF[is.na(orgDF$"Rainbow trout"), ]
+yesBrownTroutUIDs <- orgDF[!is.na(orgDF$"Brown trout"), ]
+noBrownTroutUIDs <- orgDF[is.na(orgDF$"Brown trout"), ]
+yesGalxiidsUIDs <- orgDF[is.na(orgDF$"Galaxiid"), ]
+noGalxiidsUIDs <- orgDF[!is.na(orgDF$"Galaxiid"), ]
+
+troutVar1 <- intersect(rownames(noRainTroutUIDs), rownames(noBrownTroutUIDs))
+troutfullAll_UIDs <- noRainTroutUIDs[troutVar1, ]
+
+troutVar2 <- intersect(rownames(yesRainTroutUIDs), rownames(yesBrownTroutUIDs))
+troutlessAll_UIDs <- yesRainTroutUIDs[troutVar2, ]
+```
+
+
+# Co-occurence of trout
+```{r}
+venn.diagram(x = list(rownames(noRainTroutUIDs), rownames(noBrownTroutUIDs)),
+             category.names = c("NoRainTrout", "NoBrownTrout"),
+             filename = "vennNo.png",
+             imagetype = "png")
+
+venn.diagram(x = list(rownames(yesRainTroutUIDs), rownames(yesBrownTroutUIDs)),
+             category.names = c("YesRainTrout", "YesBrownTrout"),
+             filename = "vennYes.png",
+             imagetype = "png")
+
+## Chi squared test
+# Grabs just the rainbow and brown trout
+rainBrownOrgDF <- orgDF[, c("Rainbow trout", "Brown trout")]
+rainBrownOrgDF[is.na(rainBrownOrgDF)] <- 0
+
+# Does the test
+tab <- table(rainBrownOrgDF$"Rainbow trout" > 0, rainBrownOrgDF$"Brown trout" > 0)
+model <- chisq.test(tab)
+model
+
+# actual counts
+model$observed
+# counts expected if independent
+model$expected
+```
+
+```{r}
+## Trout abundance (Contains only samples where at least one of the trout were present)
+library(tidyr)
+library(ggplot2)
+
+troutDF <- rainBrownOrgDF
+colnames(troutDF) <- c("RainbowTrout", "BrownTrout")
+
+# Keep only samples with at least one trout present
+troutDF <- troutDF[troutDF$RainbowTrout > 0 | troutDF$BrownTrout > 0, ]
+
+# Determine which species is higher per sample
+troutDF$Higher <- ifelse(troutDF$RainbowTrout > troutDF$BrownTrout, "RainbowTrout", "BrownTrout")
+
+# Reorder: BrownTrout group first, then RainbowTrout group
+troutDF <- troutDF[order(factor(troutDF$Higher, levels = c("BrownTrout", "RainbowTrout"))), ]
+
+# Use rownames as UID, preserving order via factor levels
+troutDF$UID <- factor(rownames(troutDF), levels = rownames(troutDF))
+
+troutLong <- pivot_longer(troutDF, cols = c("RainbowTrout", "BrownTrout"),
+                           names_to = "Species", values_to = "Count")
+troutLong <- troutLong[troutLong$Count > 0, ]
+
+ggplot() +
+  geom_vline(data = troutDF, aes(xintercept = as.numeric(UID), color = Higher),
+             linewidth = 3, alpha = 0.15, show.legend = FALSE) +
+  geom_point(data = troutLong, aes(x = as.numeric(UID), y = Count, fill = Species),
+             shape = 21, color = "black", size = 2.5, stroke = 0.5) +
+  scale_color_manual(values = c("RainbowTrout" = "#90c990", "BrownTrout" = "#c8a27a")) +
+  scale_fill_manual(values = c("RainbowTrout" = "#1a8c1a", "BrownTrout" = "#8b5a2b")) +
+  labs(title = "Trout Abundance per Sample", x = "Sample (UID)", y = "Count") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+Okay, thats cool, but theres the crazy outliers, gonna leave this plot how it is but try make a new one without them.
+Then gonna look at which areas these were and try figure out why tf they are like that
+
+```{r}
+troutDF2 <- rainBrownOrgDF
+colnames(troutDF2) <- c("RainbowTrout", "BrownTrout")
+
+# Keep only samples with at least one trout present
+troutDF2 <- troutDF2[troutDF2$RainbowTrout > 0 | troutDF2$BrownTrout > 0, ]
+
+# Determine which species is higher per sample
+troutDF2$Higher <- ifelse(troutDF2$RainbowTrout > troutDF2$BrownTrout, "RainbowTrout", "BrownTrout")
+
+# Reorder: BrownTrout group first, then RainbowTrout group
+troutDF2 <- troutDF2[order(factor(troutDF2$Higher, levels = c("BrownTrout", "RainbowTrout"))), ]
+
+# Use rownames as UID, preserving order via factor levels
+troutDF2$UID <- factor(rownames(troutDF2), levels = rownames(troutDF2))
+
+troutLong2 <- pivot_longer(troutDF2, cols = c("RainbowTrout", "BrownTrout"),
+                            names_to = "Species", values_to = "Count")
+troutLong2 <- troutLong2[troutLong2$Count > 0, ]
+
+# Remove points with count higher than 300000
+troutLong2 <- troutLong2[troutLong2$Count <= 300000, ]
+
+ggplot() +
+  geom_vline(data = troutDF2, aes(xintercept = as.numeric(UID), color = Higher),
+             linewidth = 3, alpha = 0.15, show.legend = FALSE) +
+  geom_point(data = troutLong2, aes(x = as.numeric(UID), y = Count, fill = Species),
+             shape = 21, color = "black", size = 2.5, stroke = 0.5) +
+  scale_color_manual(values = c("RainbowTrout" = "#90c990", "BrownTrout" = "#c8a27a")) +
+  scale_fill_manual(values = c("RainbowTrout" = "#1a8c1a", "BrownTrout" = "#8b5a2b")) +
+  labs(title = "Trout Abundance per Sample", x = "Sample (UID)", y = "Count") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+
+```{r}
+# Rebuild full long data (before outlier removal) to identify what got removed
+troutLongFull2 <- pivot_longer(troutDF2, cols = c("RainbowTrout", "BrownTrout"),
+                                names_to = "Species", values_to = "Count")
+troutLongFull2 <- troutLongFull2[troutLongFull2$Count > 0, ]
+
+# Outliers = points removed by the >300000 filter
+outliers2 <- troutLongFull2[troutLongFull2$Count > 300000, ]
+outliers2
+
+# UIDs of outlier samples
+outlierUIDs2 <- unique(as.character(outliers2$UID))
+outlierUIDs2
+
+# Pull matching sample info from samples.csv
+outlierSamples2 <- samples[samples$UID %in% outlierUIDs2, ]
+outlierSamples2
+```
+Plots the outliers on NZ map
+```{r}
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# Get species info (Higher) attached to each outlier UID
+outlierInfo2 <- merge(outliers2, samples, by = "UID")
+
+# Get NZ map
+nz <- ne_countries(scale = "medium", country = "New Zealand", returnclass = "sf")
+
+ggplot() +
+  geom_sf(data = nz, fill = "grey95", color = "black") +
+  geom_point(data = outlierInfo2, aes(x = Longitude, y = Latitude, fill = Species),
+             shape = 21, color = "black", size = 3, stroke = 0.5) +
+  scale_fill_manual(values = c("RainbowTrout" = "#1a8c1a", "BrownTrout" = "#8b5a2b")) +
+  coord_sf(xlim = c(166, 179), ylim = c(-47.5, -34)) +
+  labs(title = "Locations of Outlier Trout Samples", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+
+
+Plotting only where there are rainbow and brown trout
+```{r}
+troutDF3 <- rainBrownOrgDF
+colnames(troutDF3) <- c("RainbowTrout", "BrownTrout")
+
+# Keep only samples with BOTH rainbow and brown trout present
+troutDF3 <- troutDF3[troutDF3$RainbowTrout > 0 & troutDF3$BrownTrout > 0, ]
+
+# Determine which species is higher per sample
+troutDF3$Higher <- ifelse(troutDF3$RainbowTrout > troutDF3$BrownTrout, "RainbowTrout", "BrownTrout")
+
+# Reorder: BrownTrout group first, then RainbowTrout group
+troutDF3 <- troutDF3[order(factor(troutDF3$Higher, levels = c("BrownTrout", "RainbowTrout"))), ]
+
+# Use rownames as UID, preserving order via factor levels
+troutDF3$UID <- factor(rownames(troutDF3), levels = rownames(troutDF3))
+
+troutLong3 <- pivot_longer(troutDF3, cols = c("RainbowTrout", "BrownTrout"),
+                            names_to = "Species", values_to = "Count")
+
+# Remove points with count higher than 300000
+troutLong3 <- troutLong3[troutLong3$Count <= 300000, ]
+
+ggplot() +
+  geom_vline(data = troutDF3, aes(xintercept = as.numeric(UID), color = Higher),
+             linewidth = 3, alpha = 0.15, show.legend = FALSE) +
+  geom_point(data = troutLong3, aes(x = as.numeric(UID), y = Count, fill = Species),
+             shape = 21, color = "black", size = 2.5, stroke = 0.5) +
+  scale_color_manual(values = c("RainbowTrout" = "#90c990", "BrownTrout" = "#c8a27a")) +
+  scale_fill_manual(values = c("RainbowTrout" = "#1a8c1a", "BrownTrout" = "#8b5a2b")) +
+  labs(title = "Trout Abundance per Sample (Both Species Present)", x = "Sample (UID)", y = "Count") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+
+```{r}
+# Pie chart
+library(ggplot2)
+
+pieDF <- rainBrownOrgDF
+colnames(pieDF) <- c("RainbowTrout", "BrownTrout")
+
+pieDF$Category <- ifelse(pieDF$RainbowTrout > 0 & pieDF$BrownTrout > 0, "Both",
+                   ifelse(pieDF$RainbowTrout > 0, "RainbowOnly",
+                   ifelse(pieDF$BrownTrout > 0, "BrownOnly", NA)))
+
+pieDF <- pieDF[!is.na(pieDF$Category), ]
+
+pieCounts <- as.data.frame(table(pieDF$Category))
+colnames(pieCounts) <- c("Category", "Count")
+pieCounts$Percent <- round(100 * pieCounts$Count / sum(pieCounts$Count), 1)
+
+ggplot(pieCounts, aes(x = "", y = Count, fill = Category)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = paste0(Percent, "%")), position = position_stack(vjust = 0.5)) +
+  scale_fill_manual(values = c("Both" = "#a3a3c2", "RainbowOnly" = "#1a8c1a", "BrownOnly" = "#8b5a2b")) +
+  theme_void() +
+  labs(title = "Trout Presence Breakdown", fill = "Category")
+```
+
+```{r}
+# Categorize each sample based on trout presence
+mapDF <- rainBrownOrgDF
+colnames(mapDF) <- c("RainbowTrout", "BrownTrout")
+mapDF$UID <- rownames(mapDF)
+mapDF$Category <- ifelse(mapDF$RainbowTrout > 0 & mapDF$BrownTrout == 0, "RainbowOnly",
+                   ifelse(mapDF$BrownTrout > 0 & mapDF$RainbowTrout == 0, "BrownOnly",
+                   ifelse(mapDF$RainbowTrout == 0 & mapDF$BrownTrout == 0, "Neither", "Both")))
+
+# Merge with sample coordinates
+mapInfo <- merge(mapDF, samples, by = "UID")
+mapInfo <- mapInfo[mapInfo$Category != "Neither", ]
+
+ggplot() +
+  geom_sf(data = nz, fill = "grey95", color = "black") +
+  geom_point(data = mapInfo, aes(x = Longitude, y = Latitude, fill = Category),
+             shape = 21, color = "black", size = 1.5, stroke = 0.3, alpha = 0.5) +
+  scale_fill_manual(values = c("RainbowOnly" = "#1a8c1a",
+                                "BrownOnly" = "#8b5a2b",
+                                "Both" = "#a3a3c2")) +
+  guides(fill = guide_legend(override.aes = list(size = 4, alpha = 1))) +
+  coord_sf(xlim = c(166, 179), ylim = c(-47.5, -34)) +
+  labs(title = "Trout Presence by Sample Site", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+```{r}
+## Merge with samples first to get Latitude
+mapDF <- merge(rainBrownOrgDF, samples[, c("UID", "Latitude", "Longitude")],
+               by.x = "row.names", by.y = "UID")
+colnames(mapDF)[1] <- "UID"
+colnames(mapDF)[2:3] <- c("RainbowTrout", "BrownTrout")
+
+# Remove corrupted coordinates
+mapDF <- mapDF[!(mapDF$UID %in% c("744321","744322","744323","744324","744325","744326")), ]
+
+mapDF$Category <- ifelse(mapDF$RainbowTrout > 0 & mapDF$BrownTrout == 0, "RainbowOnly",
+                   ifelse(mapDF$BrownTrout > 0 & mapDF$RainbowTrout == 0, "BrownOnly",
+                   ifelse(mapDF$RainbowTrout == 0 & mapDF$BrownTrout == 0, "Neither", "Both")))
+
+# Final island classification rule
+mapDF$Island <- ifelse(
+  mapDF$Latitude > -40.2, "North Island",
+  ifelse(mapDF$Longitude < 174.3, "South Island", "North Island")
+)
+
+# Map plot
+ggplot() +
+  geom_sf(data = nz, fill = "grey95", color = "black") +
+  geom_point(data = mapDF, aes(x = Longitude, y = Latitude, color = Island),
+             size = 1.5, alpha = 0.5) +
+  scale_color_manual(values = c("North Island" = "red", "South Island" = "blue")) +
+  coord_sf(xlim = c(166, 179), ylim = c(-47.5, -34)) +
+  labs(title = "Samples by Island", x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# Summarize counts per island
+pieData <- as.data.frame(table(mapDF$Island, mapDF$Category))
+colnames(pieData) <- c("Island", "Category", "Count")
+pieData <- pieData[pieData$Count > 0, ]
+
+pieData <- do.call(rbind, lapply(split(pieData, pieData$Island), function(d) {
+  d$Percent <- round(100 * d$Count / sum(d$Count), 1)
+  d
+}))
+
+pieDataNorth <- pieData[pieData$Island == "North Island", ]
+pieDataSouth <- pieData[pieData$Island == "South Island", ]
+
+# North Island pie
+pieDataNorth$Label <- paste0(pieDataNorth$Category, ": ", pieDataNorth$Count, " (", pieDataNorth$Percent, "%)")
+colorMap <- c("RainbowOnly" = "#1a8c1a", "BrownOnly" = "#8b5a2b", "Both" = "#a3a3c2", "Neither" = "grey60")
+pieDataNorth$Color <- colorMap[pieDataNorth$Category]
+
+ggplot(pieDataNorth, aes(x = "", y = Count, fill = Label)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = setNames(pieDataNorth$Color, pieDataNorth$Label)) +
+  theme_void() +
+  labs(title = "North Island: Trout Presence", fill = "Category")
+
+# South Island pie
+pieDataSouth$Label <- paste0(pieDataSouth$Category, ": ", pieDataSouth$Count, " (", pieDataSouth$Percent, "%)")
+pieDataSouth$Color <- colorMap[pieDataSouth$Category]
+
+ggplot(pieDataSouth, aes(x = "", y = Count, fill = Label)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = setNames(pieDataSouth$Color, pieDataSouth$Label)) +
+  theme_void() +
+  labs(title = "South Island: Trout Presence", fill = "Category")
+```
+
+##**Diversity**
+```{r}
+diversityDF$Category2 <- ifelse(diversityDF$RainbowTrout > 0 & diversityDF$BrownTrout == 0, "RainbowOnly",
+                          ifelse(diversityDF$BrownTrout > 0 & diversityDF$RainbowTrout == 0, "BrownOnly",
+                          ifelse(diversityDF$RainbowTrout == 0 & diversityDF$BrownTrout == 0, "Neither",
+                          "Both")))
+
+# Build a long version with an extra "Either" group added alongside the four categories
+eitherDF <- diversityDF[diversityDF$RainbowTrout > 0 | diversityDF$BrownTrout > 0, ]
+eitherDF$Category2 <- "Either"
+
+diversityLong <- rbind(diversityDF, eitherDF)
+diversityLong$Category2 <- factor(diversityLong$Category2,
+                                   levels = c("RainbowOnly", "BrownOnly", "Both", "Neither", "Either"))
+
+# Richness boxplot
+ggplot(diversityLong, aes(x = Category2, y = Richness, fill = Category2)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("RainbowOnly" = "#1a8c1a", "BrownOnly" = "#8b5a2b",
+                                "Both" = "#a3a3c2", "Neither" = "grey60", "Either" = "#d9a441")) +
+  labs(title = "Species Richness by Trout Presence", y = "Species Richness", x = "Trout Category") +
+  theme_minimal()
+
+# Shannon diversity boxplot
+ggplot(diversityLong, aes(x = Category2, y = Shannon, fill = Category2)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("RainbowOnly" = "#1a8c1a", "BrownOnly" = "#8b5a2b",
+                                "Both" = "#a3a3c2", "Neither" = "grey60", "Either" = "#d9a441")) +
+  labs(title = "Shannon Diversity by Trout Presence", y = "Shannon Index", x = "Trout Category") +
+  theme_minimal()
+```
+WHEN TROUT ARRIVE DOES IT FUCK THE DIVERSITY
+
+```{r}
+analyze_trout_arrival <- function(fullDF, troutPresentFunc, label) {
+
+  fullDF$TroutPresent <- troutPresentFunc(fullDF)
+
+  siteCounts <- table(fullDF$SiteID)
+  validSites <- names(siteCounts[siteCounts >= 2])
+  siteDF <- fullDF[fullDF$SiteID %in% validSites, ]
+
+  siteDF <- siteDF[order(siteDF$SiteID, siteDF$CollectionDate), ]
+
+  results <- do.call(rbind, lapply(split(siteDF, siteDF$SiteID), function(d) {
+    first <- d[1, ]
+    last <- d[nrow(d), ]
+    data.frame(
+      SiteID = first$SiteID,
+      Latitude = first$Latitude,
+      Longitude = first$Longitude,
+      TroutFirst = first$TroutPresent,
+      TroutLast = last$TroutPresent,
+      ShannonFirst = first$Shannon,
+      ShannonLast = last$Shannon,
+      DiversityChange = last$Shannon - first$Shannon,
+      DateFirst = first$CollectionDate,
+      DateLast = last$CollectionDate,
+      YearsGap = as.numeric(difftime(last$CollectionDate, first$CollectionDate, units = "days")) / 365.25
+    )
+  }))
+
+  arrivalSites <- results[results$TroutFirst == FALSE & results$TroutLast == TRUE, ]
+  return(arrivalSites)
+}
+
+# Regenerate arrival datasets with date info
+rainbowArrival <- analyze_trout_arrival(fullDF, function(d) d$RainbowTrout > 0, "Rainbow Trout")
+brownArrival <- analyze_trout_arrival(fullDF, function(d) d$BrownTrout > 0, "Brown Trout")
+bothArrival <- analyze_trout_arrival(fullDF, function(d) d$RainbowTrout > 0 & d$BrownTrout > 0, "Both Trout")
+eitherArrival <- analyze_trout_arrival(fullDF, function(d) d$RainbowTrout > 0 | d$BrownTrout > 0, "Either Trout")
+
+library(patchwork)
+
+plot_arrival_single <- function(arrivalData, label, gap) {
+  filtered <- arrivalData[arrivalData$YearsGap >= gap, ]
+
+  maxAbs <- max(abs(filtered$DiversityChange), na.rm = TRUE)
+
+  ggplot() +
+    geom_sf(data = nz, fill = "grey95", color = "black") +
+    geom_point(data = filtered, aes(x = Longitude, y = Latitude, fill = DiversityChange),
+               shape = 21, color = "black", size = 2, alpha = 0.9, stroke = 0.3) +
+    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0,
+                          limits = c(-maxAbs/4, maxAbs/4), oob = scales::squish) +
+    coord_sf(xlim = c(166, 179), ylim = c(-47.5, -34)) +
+    labs(title = paste0(label, " (n=", nrow(filtered), ")"), fill = "Shannon\nChange") +
+    theme_minimal() +
+    theme(axis.title = element_blank(), axis.text = element_text(size = 6))
+}
+
+gaps <- c(0, 1, 2)
+
+for (g in gaps) {
+  p1 <- plot_arrival_single(rainbowArrival, "Rainbow Trout", g)
+  p2 <- plot_arrival_single(brownArrival, "Brown Trout", g)
+  p3 <- plot_arrival_single(bothArrival, "Both Trout", g)
+  p4 <- plot_arrival_single(eitherArrival, "Either Trout", g)
+
+  combined <- (p1 | p2) / (p3 | p4) +
+    plot_annotation(title = paste0("Diversity Change on Trout Arrival (", g, "+ yr gap)"))
+
+  print(combined)
+}
+```
+WHEN TROUT INCREASES DOES IT FUCK THE DIVERSITY
+```{r}
+# Recompute using ALL sites with 2+ samples
+siteCounts2 <- table(fullDF$SiteID)
+validSites2 <- names(siteCounts2[siteCounts2 >= 2])
+siteDF2 <- fullDF[fullDF$SiteID %in% validSites2, ]
+siteDF2 <- siteDF2[order(siteDF2$SiteID, siteDF2$CollectionDate), ]
+
+changeDF2 <- do.call(rbind, lapply(split(siteDF2, siteDF2$SiteID), function(d) {
+  first <- d[1, ]
+  last <- d[nrow(d), ]
+  data.frame(
+    SiteID = first$SiteID,
+    Latitude = first$Latitude,
+    Longitude = first$Longitude,
+    TroutChange_Rainbow2 = last$RainbowTrout - first$RainbowTrout,
+    TroutChange_Brown2 = last$BrownTrout - first$BrownTrout,
+    TroutChange_Both2 = pmin(last$RainbowTrout, last$BrownTrout) - pmin(first$RainbowTrout, first$BrownTrout),
+    TroutChange_Either2 = pmax(last$RainbowTrout, last$BrownTrout) - pmax(first$RainbowTrout, first$BrownTrout),
+    DiversityChange2 = last$Shannon - first$Shannon,
+    YearsGap2 = as.numeric(difftime(last$CollectionDate, first$CollectionDate, units = "days")) / 365.25
+  )
+}))
+
+# Plotting function: filters to sites where trout increased, colors by diversity change
+plot_change_single2 <- function(changeDF2, troutCol, label, gap) {
+  plotData <- changeDF2[changeDF2$YearsGap2 >= gap, ]
+  plotData <- plotData[plotData[[troutCol]] > 0, ]
+
+  maxAbs <- max(abs(plotData$DiversityChange2), na.rm = TRUE)
+
+  ggplot() +
+    geom_sf(data = nz, fill = "grey95", color = "black") +
+    geom_point(data = plotData, aes(x = Longitude, y = Latitude, fill = DiversityChange2),
+               shape = 21, color = "black", size = 2, alpha = 0.9, stroke = 0.3) +
+    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0,
+                          limits = c(-maxAbs/4, maxAbs/4), oob = scales::squish) +
+    coord_sf(xlim = c(166, 179), ylim = c(-47.5, -34)) +
+    labs(title = paste0(label, " (n=", nrow(plotData), ")"), fill = "Shannon\nChange") +
+    theme_minimal() +
+    theme(axis.title = element_blank(), axis.text = element_text(size = 6))
+}
+
+# Generate combined plots for each year-gap threshold
+gaps2 <- c(0, 1, 2)
+
+for (g in gaps2) {
+  p1 <- plot_change_single2(changeDF2, "TroutChange_Rainbow2", "Rainbow Trout Increase", g)
+  p2 <- plot_change_single2(changeDF2, "TroutChange_Brown2", "Brown Trout Increase", g)
+  p3 <- plot_change_single2(changeDF2, "TroutChange_Both2", "Both Trout Increase", g)
+  p4 <- plot_change_single2(changeDF2, "TroutChange_Either2", "Either Trout Increase", g)
+
+  combined <- (p1 | p2) / (p3 | p4) +
+    plot_annotation(title = paste0("Diversity Change on Trout Increase (", g, "+ yr gap)"))
+
+  print(combined)
+}
+```
+
+
+```{r}
+library(tidyr)
+# Trout count change density plot, filtered to sites where that trout type increased
+troutChangeLong2_filtered <- troutChangeLong2[troutChangeLong2$TroutChangeValue > 0, ]
+
+ggplot(troutChangeLong2_filtered, aes(x = TroutChangeValue, fill = TroutType)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Distribution of Trout Count Increase", x = "Increase in Trout Count", y = "Density", fill = "Trout Type") +
+  theme_minimal()
+
+# Diversity change density plot, one curve per trout type, using sites where that type increased
+diversityLong2_filtered <- pivot_longer(
+  changeDF2,
+  cols = c("TroutChange_Rainbow2", "TroutChange_Brown2", "TroutChange_Both2", "TroutChange_Either2"),
+  names_to = "TroutType",
+  values_to = "TroutChangeValue"
+)
+
+diversityLong2_filtered$TroutType <- factor(diversityLong2_filtered$TroutType,
+  levels = c("TroutChange_Rainbow2", "TroutChange_Brown2", "TroutChange_Both2", "TroutChange_Either2"),
+  labels = c("Rainbow", "Brown", "Both", "Either"))
+
+diversityLong2_filtered <- diversityLong2_filtered[diversityLong2_filtered$TroutChangeValue > 0, ]
+
+ggplot(diversityLong2_filtered, aes(x = DiversityChange2, fill = TroutType)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Diversity Change at Sites with Trout Increase", x = "Change in Shannon Diversity", y = "Density", fill = "Trout Type") +
+  theme_minimal()
+```
+
+
+```{r}
+siteCounts <- as.data.frame(table(fullDF$SiteID))
+colnames(siteCounts) <- c("SiteID", "NumSamples")
+
+# Number of sites with 2+ samples (repeat visits)
+sum(siteCounts$NumSamples >= 2)
+
+# Full breakdown
+table(siteCounts$NumSamples)
+```
+
