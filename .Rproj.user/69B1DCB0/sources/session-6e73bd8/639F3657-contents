@@ -1,0 +1,199 @@
+# Load packages
+
+install.packages(c("betapart", "ade4", "labdsv", "ape", "ggplot2", "vegan"))
+
+library(betapart)
+library(ade4)
+library(labdsv)
+library(ape)
+library(ggplot2)
+library(vegan)
+
+
+# Read data
+
+data <- read.csv(
+  "C:/Users/mccgr18p/OneDrive - University of Otago/Desktop/Teaching/GENE412/GENE412 eDNA/Sample data.csv"
+)
+
+str(data)
+
+
+# Remove first column (assumed taxa names or IDs)
+
+dat <- data[, -1]
+
+
+# Transpose data so rows = sites, columns = taxa
+
+dat <- t(dat)
+
+colnames(dat) <- data$Taxa
+
+str(dat)
+
+
+# Convert to data frame for easier manipulation
+
+datfull <- as.data.frame(dat)
+
+
+# Add forestcover vector: 15 Forested, 15 Reforested
+
+datfull$forestcover <- c(
+  rep("Forested", 15),
+  rep("Reforested", 15)
+)
+
+str(datfull)
+
+
+# Add site names as a column
+
+datfull$site <- rownames(datfull)
+
+
+# Make sure all columns (taxa) are numeric
+
+for (i in 1:(ncol(datfull) - 2)) {
+ 
+  datfull[, i] <- as.numeric(as.character(datfull[, i]))
+ 
+}
+
+str(datfull)
+
+
+# Convert back to matrix for beta diversity functions
+
+dat_matrix <- as.matrix(
+  datfull[, 1:(ncol(datfull) - 2)]
+)
+
+
+# Calculate multi-site beta diversity metrics
+
+beta_multi <- beta.multi(dat_matrix)
+
+print(beta_multi)
+
+
+# Calculate pairwise Sorensen dissimilarity matrix
+
+soren <- beta.pair(
+  dat_matrix,
+  index.family = "sorensen"
+)
+
+Bsor <- soren$beta.sor
+
+
+# Histogram of dissimilarities
+
+hist(
+  Bsor,
+  breaks = 30,
+  main = "Histogram of Sorensen distances",
+  xlab = "Sorensen dissimilarity"
+)
+
+
+# Principal Coordinates Analysis (PCoA)
+
+pcoa_result <- pcoa(Bsor)
+
+
+# Create data frame for plotting PCoA results
+
+datpcoa <- data.frame(
+  p1 = pcoa_result$vectors[, 1],
+  p2 = pcoa_result$vectors[, 2],
+  p3 = pcoa_result$vectors[, 3],
+  p4 = pcoa_result$vectors[, 4],
+  forestcover = datfull$forestcover,
+  site = datfull$site
+)
+
+
+# PCoA plot with labels
+
+ggplot(datpcoa, aes(x = p1, y = p2)) +
+ 
+  geom_point(
+    aes(fill = forestcover),
+    shape = 21,
+    size = 6
+  ) +
+ 
+  geom_text(
+    aes(label = site),
+    vjust = -1,
+    size = 3
+  ) +
+ 
+  theme_classic() +
+ 
+  labs(
+    x = "PCoA 1",
+    y = "PCoA 2",
+    fill = ""
+  ) +
+ 
+  scale_fill_manual(
+    values = c(
+      "Forested" = "forestgreen",
+      "Reforested" = "goldenrod"
+    )
+  ) +
+ 
+  theme(
+    text = element_text(size = 12),
+    axis.text.y = element_text(colour = "black"),
+    axis.text.x = element_text(colour = "black")
+  )
+
+
+# PCoA plot without labels
+
+ggplot(datpcoa, aes(x = p1, y = p2)) +
+ 
+  geom_point(
+    aes(fill = forestcover),
+    shape = 21,
+    size = 6
+  ) +
+ 
+  theme_classic() +
+ 
+  labs(
+    x = "PCoA 1",
+    y = "PCoA 2",
+    fill = ""
+  ) +
+ 
+  scale_fill_manual(
+    values = c(
+      "Forested" = "forestgreen",
+      "Reforested" = "goldenrod"
+    )
+  ) +
+ 
+  theme(
+    text = element_text(size = 12),
+    axis.text.y = element_text(colour = "black"),
+    axis.text.x = element_text(colour = "black")
+  )
+
+
+# PERMANOVA test for differences between forestcover groups
+
+permanova_result <- adonis2(
+  Bsor ~ forestcover,
+  data = datpcoa,
+  permutations = 9999
+)
+
+print(permanova_result)
+
+
+

@@ -1,0 +1,100 @@
+---
+title: "TroutTime"
+author: "Dylan Rees Jones"
+date: "2026-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(VennDiagram)
+library(tidyr)
+records <- read_csv("Desktop/WilderlabPublicData-2026-08-17 1403/records.csv")
+samples <- read_csv("Desktop/WilderlabPublicData-2026-08-17 1403/samples.csv")
+```
+##**First lookin around**
+```{r}
+nrow(records) # <- Checking the number of samples
+nrow(samples) # <- ""
+
+# Setting up different trout data
+Trout <- records[records$CommonName == "Trout", ]
+BrownTrout <- records[records$CommonName == "Trout", ]
+RainTrout <- records[records$CommonName == "Rainbow Trout", ]
+
+# Includes all the other kind of trout thingos
+allTrout <- records[grepl("trout", records$CommonName, ignore.case = TRUE), ]
+
+# Kind of weird, not organised amazingly well
+table(allTrout$CommonName)
+
+## Gonna stick with just brown trout and rainbow trout
+duoTrout <- rbind(BrownTrout, RainTrout)
+```
+
+
+```{r}
+## Rearanging the dataframe
+
+# How many IDs there are
+length(unique(records$UID))
+
+# Makes the dataframes
+commonNamesList <- as.list(unique(records$CommonName))
+uidsList <- as.list(unique(records$UID))
+
+orgDF <- data.frame(matrix(NA, nrow = length(uidsList), ncol = length(commonNamesList)))
+rownames(orgDF) <- uidsList
+colnames(orgDF) <- commonNamesList
+
+# Checks how many times each fish shows up in the data
+# Gonna keep em all
+fishPlot <- table(records$CommonName)
+barplot(fishPlot, las = 2)
+
+# Reorders the dataframe
+records <- records[!is.na(records$CommonName), ]
+for (i in 1:nrow(records)) {
+  id <- records$UID[i]
+  name <- records$CommonName[i]
+  count <- records$Count[i]
+  orgDF[as.character(id), as.character(name)] <- count
+}
+```
+
+# Amount of trout
+```{r}
+noRainTroutUIDs <- orgDF[!is.na(orgDF$"Rainbow trout"), ]
+yesRainTroutUIDs <- orgDF[is.na(orgDF$"Rainbow trout"), ]
+noBrownTroutUIDs <- orgDF[!is.na(orgDF$"Brown trout"), ]
+yesBrownTroutUIDs <- orgDF[is.na(orgDF$"Brown trout"), ]
+
+troutVar1 <- intersect(rownames(noRainTroutUIDs), rownames(noBrownTroutUIDs))
+troutfullAll_UIDs <- noRainTroutUIDs[troutVar1, ]
+
+troutVar2 <- intersect(rownames(yesRainTroutUIDs), rownames(yesBrownTroutUIDs))
+troutlessAll_UIDs <- yesRainTroutUIDs[troutVar2, ]
+
+```
+
+```{r}
+venn.diagram(x = list(rownames(noRainTroutUIDs), rownames(noBrownTroutUIDs)),
+             category.names = c("NoRainTrout", "NoBrownTrout"),
+             filename = "vennNo.png",
+             imagetype = "png")
+
+venn.diagram(x = list(rownames(yesRainTroutUIDs), rownames(yesBrownTroutUIDs)),
+             category.names = c("YesRainTrout", "YesBrownTrout"),
+             filename = "vennYes.png",
+             imagetype = "png")
+```
+
+##**Diversity**
+```{r}
+
+```
+
