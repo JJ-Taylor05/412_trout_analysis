@@ -1,4 +1,0 @@
-library(wilderlab)
-
-records = read.csv('records.csv')
-samples = read.csv('samples.csv')

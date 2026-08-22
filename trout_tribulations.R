@@ -26,12 +26,27 @@ for (i in 1:nrow(records)) {
   orgDF[as.character(id), as.character(name)] <- count
 }
 
-## Trout map ##
-# Flag each site (UID) as trout-present if EITHER brown or rainbow trout
-# was recorded there
+# Flag each site (UID) as trout-present if trout was recorded there
 orgDF$UID <- as.character(rownames(orgDF))
-orgDF$Has_Trout <- !is.na(orgDF$"Rainbow trout") | !is.na(orgDF$"Brown trout")
+orgDF$Has_Trout <- !is.na(orgDF$"Rainbow trout") | !is.na(orgDF$"Brown trout" | !is.na(orgDF$"Trout"))
 
+# Exclude marine species - likely mislabelled
+marineSpecies <- c(
+  "Blue cod", "Yellowtail kingfish", "Bluefin Gurnard", "Trevally",
+  "Tarakihi", "Banded Parrotfish", "Blue warehou", "Swordfish", "Red cod",
+  "Orange roughy", "Indian mackerel", "Mahi-Mahi", "Sunfish", "Yelloweye mullet"
+)
+marineCols <- intersect(colnames(orgDF), marineSpecies)
+
+hasMarine <- rowSums(!is.na(orgDF[, marineCols, drop = FALSE])) > 0 
+cat(sprintf(
+  "%d sites with marine species removed from analysis\n",
+  length(marineCols)
+))
+
+orgDF <- orgDF[!hasMarine, ]
+
+## Trout map ##
 # Bring in site coordinates from samples.csv
 samples$UID <- as.character(samples$UID)
 mapData <- merge(orgDF[, c("UID", "Has_Trout")], samples, by = "UID")
@@ -199,15 +214,23 @@ ggsave("seqdepth_var.png", plot = seqdepth_var, width = 6, height = 5, dpi = 300
 depthTest <- cor.test(orgDF$SeqDepth, orgDF$Shannon, method = "spearman")
 depthTest
 
-## MAKE STATS A LEGEND ON GRAPH ##
+# Plot corr
 corr_depth_shannon <- ggplot(orgDF, aes(x = SeqDepth, y = Shannon)) +
   geom_point(alpha = 0.3) +
   geom_smooth(method = "loess", colour = "grey") +
-  labs(
-    title = paste0(
-      "Shannon diversity vs sequencing depth (Spearman rho = ", round(depthTest$estimate, 2), ", p = ", signif(depthTest$p.value, 3), ")"
+  annotate(
+    "label",
+    x = Inf, y = Inf,
+    label = paste0(
+      "Spearman rho = ", round(depthTest$estimate, 2),
+      "\np = ", signif(depthTest$p.value, 3)
     ),
-    x = "Number of sequences (TICINoSeqs)", y = "Shannon Diversity Index"
+    hjust = 1, vjust = 1,
+    fill = "white", label.size = 0.3
+  ) +
+  labs(
+    title = "Shannon diversity vs sequencing depth",
+    x = "Number of sequences (SeqDepth)", y = "Shannon Diversity Index"
   ) +
   theme_minimal()
 
@@ -217,7 +240,7 @@ ggsave("corr_depth_shannon.png", plot = corr_depth_shannon, width = 6, height = 
 ## Rarefy (normalisation transformation) community matrix ##
 ## Recompute Shannon with common seq depth ##
 # Remove sites with low sequencing depth
-minDepth <- round(quantile(orgDF$SeqDepth, 0.10, na.rm = TRUE))
+minDepth <- round(quantile(orgDF$SeqDepth, 0.30, na.rm = TRUE))
 keep <- !is.na(orgDF$SeqDepth) & orgDF$SeqDepth >= minDepth
 cat(sprintf(
   "Rarefying to %d sequences; dropping %d of %d sites below this depth\n",
@@ -287,3 +310,51 @@ troutsites_diversity_rarefied <- plotDiversity(
 
 troutsites_diversity_rarefied
 ggsave("troutsites_diversity_rarefied.png", plot = troutsites_diversity_rarefied, width = 6, height = 5, dpi = 300)
+
+## Histogram of # of species per site ##
+# Number of species per site
+orgDF$Richness <- rowSums(commMatrix > 0)
+
+# Standardise axes
+richnessXLim <- c(min(orgDF$Richness, na.rm = TRUE) -1, max(orgDF$Richness, na.rm = TRUE) + 1)
+richnessYMax <- max(
+  table(orgDF$Richness[orgDF$Has_Trout]),
+  table(orgDF$Richness[!orgDF$Has_Trout])
+)
+
+# Plot
+plotSpeciesNo <- function(data, title, colour, xlim, ymax) {
+  meanRichness <- mean(data$Richness, na.rm = TRUE)
+  ggplot(data, aes(x = Richness)) +
+    geom_histogram(binwidth = 1, boundary = -0.5, fill = colour, colour = "white") +
+    scale_x_continuous(limits = xlim) +
+    coord_cartesian(ylim = c(0, ymax + 1.05)) +
+    annotate(
+      "label",
+      x = xlim[2], y = ymax + 1.05,
+      label = paste0("Mean species per site = ", round(meanRichness, 2)),
+      hjust = 1, vjust = 1,
+      fill = "white", label.size = 0.3
+    ) +
+    labs(title = title, x = "Number of species", y = "Number of sites") +
+    theme_minimal()
+}
+
+richness_trout <- plotSpeciesNo(
+  orgDF[orgDF$Has_Trout, ], "Species Richness - Trout Sites", "mediumblue",
+  xlim = richnessXLim, ymax = richnessYMax
+)
+
+richness_trout
+ggsave("richness_hist_trout.png", plot = richness_trout, width = 6, height = 5, dpi = 300)
+
+richness_notrout <- plotSpeciesNo(
+  orgDF[!orgDF$Has_Trout, ], "Species Richness - No Trout Sites", "grey15",
+  xlim = richnessXLim, ymax = richnessYMax
+)
+
+richness_notrout
+ggsave("richness_hist_notrout.png", plot = richness_notrout, width = 5, height = 5, dpi = 300)
+
+
+
