@@ -28,7 +28,7 @@ for (i in 1:nrow(records)) {
 
 # Flag each site (UID) as trout-present if trout was recorded there
 orgDF$UID <- as.character(rownames(orgDF))
-orgDF$Has_Trout <- !is.na(orgDF$"Rainbow trout") | !is.na(orgDF$"Brown trout" | !is.na(orgDF$"Trout"))
+orgDF$Has_Trout <- !is.na(orgDF$"Rainbow trout") | !is.na(orgDF$"Brown trout") | !is.na(orgDF$"Trout")
 
 # Exclude marine species - likely mislabelled
 marineSpecies <- c(
@@ -356,5 +356,196 @@ richness_notrout <- plotSpeciesNo(
 richness_notrout
 ggsave("richness_hist_notrout.png", plot = richness_notrout, width = 5, height = 5, dpi = 300)
 
+## Native species-specific richness ##
+# Identify native species in the dataset (based on NZFFD dataset)
+nativeSpecies <- c(
+  # Eels 
+  "Eel", "Eels", "Longfin eel", "Shortfin eel", "Speckled longfin eel",
+  
+  # Galaxiids, kokopu, and torrentfish 
+  "Galaxiids", "Inanga", "Koaro",
+  "Banded kokopu", "Giant kokopu", "Giant or shortjaw kokopu", "Shortjaw kokopu",
+  "Alpine galaxias", "Bignose galaxias", "Canterbury galaxias",
+  "Clutha flathead galaxias", "Clutha or Teviot flathead galaxias",
+  "Clutha, Pomahaka or Taieri flathead galaxias", "Dune lakes galaxias",
+  "Dusky galaxias", "Dusky or roundhead galaxias", "Dwarf galaxias",
+  "Dwarf or Alpine galaxias", "Eldons galaxias", "Gollum galaxias",
+  "Longjawed galaxias", "Lowland longjaw galaxias", "Nevis gollum galaxias",
+  "Northern flathead galaxias", "Pomahaka galaxias", "Roundhead galaxias",
+  "Southern flathead galaxias", "Southern, Clutha, Pomahaka or Taieri flathead galaxias",
+  "Taieri flathead galaxias", "Taieri or Clutha flathead galaxias",
+  "Taieri or Teviot flathead galaxias", "Taieri or southern flathead galaxias",
+  "Waitaki lowland longjaw galaxias", "Waitaki upland longjaw galaxias",
+  "Torrentfish", "Torrentfishes",
+  
+  # Mudfish 
+  "Black mudfish", "Brown mudfish", "Canterbury mudfish", "Northland mudfish",
+  "Mudfish", "mudfish",
+  
+  # Bullies 
+  "Bluegilled bully", "Common bully", "Common/Cran/Dinahs bully", "Crans bully",
+  "Giant bully", "Kaharore bully", "Redfin bully", "Upland bully",
+  "Upland or kaharore bully", "Bullies",
+  
+  # Smelt 
+  "Common smelt", "Stokell's smelt", "Smelt",
+  
+  # Lamprey 
+  "Lamprey", "Pouched lamprey",
+  
+  # Flounder 
+  "Black Flounder, freshwater flounder"
+)
+
+nativeCols <- intersect(colnames(commMatrix), nativeSpecies)
+
+# Native species richness
+orgDF$NativeRichness <- rowSums(commMatrix[, nativeCols, drop = FALSE] > 0)
+
+# Shared axis limits
+nativeXLim <- c(min(orgDF$NativeRichness, na.rm = TRUE) - 1, max(orgDF$NativeRichness, na.rm = TRUE) + 1)
+nativeYMax <- max(
+  table(orgDF$NativeRichness[orgDF$Has_Trout]),
+  table(orgDF$NativeRichness[!orgDF$Has_Trout])
+)
+
+# Plot template
+plotNativeSpeciesNo <- function(data, title, colour, xlim, ymax) {
+  meanNative <- mean(data$NativeRichness, na.rm = TRUE)
+  
+  ggplot(data, aes(x = NativeRichness)) +
+    geom_histogram(binwidth = 1, boundary = -0.5, fill = colour, colour = "white") +
+    scale_x_continuous(limits = xlim) +
+    coord_cartesian(ylim = c(0, ymax + 1.05)) +
+    annotate(
+      "label",
+      x = xlim[2], y = ymax + 1.05,
+      label = paste0("Mean native species/site = ", round(meanNative, 2)),
+      hjust = 1, vjust = 1,
+      fill = "white", label.size = 0.3
+    ) +
+    labs(title = title, x = "Number of native species", y = "Number of sites") +
+    theme_minimal()
+}
+
+nativerichness_trout <- plotNativeSpeciesNo(
+  orgDF[orgDF$Has_Trout, ], "Native Species Richness - Trout Sites", "mediumblue",
+  xlim = nativeXLim, ymax = nativeYMax
+)
+
+nativerichness_trout
+ggsave("native_richness_hist_trout.png", plot = nativerichness_trout, width = 6, height = 5, dpi = 300)
+
+nativerichness_notrout <- plotNativeSpeciesNo(
+  orgDF[!orgDF$Has_Trout, ], "Native Species Richness - No Trout Sites", "grey15",
+  xlim = nativeXLim, ymax = nativeYMax
+)
+
+nativerichness_notrout
+ggsave("nativerichness_hist_notrout.png", plot = nativerichness_notrout, width = 6, height = 5, dpi = 300)
+
+## Habitat covariates ##
+# Pull habitat data
+habitatData <- samples[, c("UID", "EnvironmentType", "Region")]
+habitatData$UID <- as.character(habitatData$UID)
+modelDF <- merge(orgDF, habitatData, by = "UID")
+
+# Shannon diversity ~ trout presence + habitat
+shannonModel <- lm(Shannon ~ Has_Trout + EnvironmentType + Region, data = modelDF)
+summary(shannonModel)
+
+# Overall richness ~ trout presence + habitat 
+richnessModel <- glm(Richness ~ Has_Trout + EnvironmentType + Region, data = modelDF, family = poisson)
+summary(richnessModel)
+
+# Native richness ~ trout presence + habitat
+nativeRichnessModel <- glm(NativeRichness ~ Has_Trout + EnvironmentType + Region, data = modelDF, family = poisson)
+summary(nativeRichnessModel)
 
 
+## Stratified comparison of trout/no trout in each habitat
+# Plot 
+plotDiversityStratified <- ggplot(modelDF, aes(x = Has_Trout, y = Shannon, fill = Has_Trout)) +
+  geom_boxplot(outlier.alpha = 0.4) +
+  geom_jitter(width = 0.15, alpha = 0.15, size = 0.6) +
+  scale_x_discrete(labels = c("No Trout", "Trout")) +
+  scale_fill_manual(values = c("grey15", "mediumblue")) +
+  facet_wrap(~ EnvironmentType, scales = "free_y") +
+  labs(
+    title = "Shannon Diversity - Trout vs No Trout in each habitat type",
+    x = NULL, y = "Shannon Diversity Index"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+    
+plotDiversityStratified
+ggsave("diversity_stratified_by_habitat.png", plot = plotDiversityStratified, width = 8, height = 6, dpi = 300)
+
+## Upstream vs downstream of waterfalls effect ##
+## Using a small subset of the data that has manually assigned location ##
+aboveWaterfallUIDs <- c(
+  "406581", "406582", "406583", "406584", "406585", "406586",  # Moutere River U/S Moutere Weir
+  "511455",                                                     # Immediately upstream St Ronans Ave weir
+  "519349", "519350", "519351", "519352", "519353", "519354",  # Pukatea Stream Site 2 - above ornamental weirs
+  "519358",                                                     # Pukatea Stream Site 3 - above barrier 6
+  "524825",                                                     # Waitawhara Stream above weir
+  "527455", "527459",                                           # silverstream - US of weir
+  "531234", "531235", "531236", "531239", "531240", "531242",  # Wharerangi Stream above waterfall
+  "538756", "538760",                                           # Upstream River Rd Barrier
+  "558166", "558167", "558168", "558169", "558170", "558171",  # Mangatu Stream US of waterfall
+  "703861", "703862", "703863", "703864", "703865", "703866",  # Te Arai River Bush Intake Above Weir
+  "714002", "714006",                                           # U/S Weir
+  "716092", "716094",                                           # Wharekopae above falls
+  "727781", "727782", "727783", "727784", "727785", "727786",  # Little Huia Stream above weir
+  "727841", "727842", "727843", "727844", "727845", "727846",  # Big Huia Stream above weir
+  "731731", "731732", "731733", "731734", "731735", "731736",  # Mangahere u/s waterfall
+  "736781", "736782", "736783", "736784", "736785", "736786",  # Orongorongo River above weir
+  "739911", "739912", "739913", "739914", "739915", "739916"   # Waterfall Rd upstream of culvert
+)
+
+belowWaterfallUIDs <- c(
+  "519343", "519344", "519345", "519346", "519347", "519348",  # Pipitea Stream Site 1 - below all barriers
+  "520155", "520275", "520278",                                 # Mangaiwi Stream downstream of Weir
+  "528206",                                                     # Falls Ck Downstream
+  "539593", "539638",                                           # Silverstream - DS of weir
+  "703911", "703912", "703913", "703914", "703915", "703916",  # Te Arai Trib Below Intake Weir
+  "731701", "731702", "731703", "731704", "731705", "731706",  # Boundary stream below Shine falls
+  "736684"                                                      # Orongorongo River below weirs
+)
+
+waterfallDF <- orgDF[orgDF$UID %in% c(aboveWaterfallUIDs, belowWaterfallUIDs), ]
+waterfallDF$Barrier <- ifelse(waterfallDF$UID %in% aboveWaterfallUIDs, "Above Waterfall", "Below Waterfall")
+
+if (nrow(waterfallDF) == 0) {
+  cat("No UIDs entered yet - fill in aboveWaterfallUIDs / belowWaterfallUIDs to run this comparison\n")
+} else {
+  waterfallPlot <- ggplot(waterfallDF, aes(x = Barrier, y = Shannon, fill = Barrier)) +
+    geom_boxplot(outlier.alpha = 0.4) +
+    geom_jitter(width = 0.15, alpha = 0.4, size = 1) +
+    scale_fill_manual(values = c("Above Waterfall" = "steelblue", "Below Waterfall" = "grey15")) +
+    labs(
+      title = "Shannon Diversity - Above vs Below Waterfall",
+      x = NULL, y = "Shannon Diversity Index"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  waterfallPlot
+  ggsave("diversity_waterfall_barrier.png", plot = waterfallPlot, width = 6, height = 5, dpi = 300)
+  
+  nAbove <- sum(waterfallDF$Barrier == "Above Waterfall")
+  nBelow <- sum(waterfallDF$Barrier == "Below Waterfall")
+  
+  if (nAbove >= 3 && nBelow >= 3) {
+    waterfallTest <- wilcox.test(Shannon ~ Barrier, data = waterfallDF)
+    cat(sprintf(
+      "Above vs below waterfall: n(above)=%d, n(below)=%d, Wilcoxon p = %.4g\n",
+      nAbove, nBelow, waterfallTest$p.value
+    ))
+  } else {
+    cat(sprintf(
+      "Too few sites for a test yet (n(above)=%d, n(below)=%d) - add more UIDs\n",
+      nAbove, nBelow
+    ))
+  }
+}

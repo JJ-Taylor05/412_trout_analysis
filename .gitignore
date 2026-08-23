@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .Rproj.user
 .Rhistory
 .RData
@@ -5,3 +6,9 @@
 *.png
 *.html
 *.zip
+=======
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+>>>>>>> dc3baf6270664f9b6214113cdb0a5cccad48f600
